@@ -20,7 +20,10 @@ class BridgeTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.runs = self.root / "runs"
         self.runs.mkdir()
-        self.patches = [patch.object(bridge, "RUNS", self.runs)]
+        for name in ('worker-instructions.txt', 'worker-reminder.txt', 'dashboard.html'):
+            (self.root/name).write_bytes((bridge.ROOT/name).read_bytes())
+        (self.root/'settings.json').write_text('{"backend":"headless"}',encoding='utf-8')
+        self.patches = [patch.object(bridge, "ROOT", self.root), patch.object(bridge, "RUNS", self.runs)]
         for item in self.patches:
             item.start()
         helper = self.root / "fake.py"
