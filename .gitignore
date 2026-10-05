@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+generated/
+runs/
+backups/
+reference/
+.temp/
+.submit.lock
+.env
+.env.*
+connection.json
+tasks.json
+settings.local.json
+verification-*.json
+*-preview.png

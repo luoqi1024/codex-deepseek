@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Codex × DeepSeek 协作面板</title>
+<style>
+  :root{
+    --bg:#f4f7fb; --card:#fff; --line:#dfe6f0; --text:#1b2740; --muted:#6b7c93;
+    --codex:#2563eb; --ds:#0d9488; --tool:#cbd5e1;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 20px 70px}
+  header.top h1{font-size:21px;margin:0 0 3px}
+  header.top p{margin:0;color:var(--muted);font-size:13px}
+
+  #banner{display:none;margin:14px 0 0;padding:11px 14px;border-radius:10px;font-size:14px;border:1px solid;overflow-wrap:anywhere}
+  #banner.show{display:block}
+  #banner.err{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+  #banner.ok{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+  #banner.warn{background:#fffbeb;border-color:#fde68a;color:#92400e}
+
+  .layout{display:flex;gap:18px;align-items:flex-start;margin-top:16px}
+  .sidebar{flex:0 0 254px;position:sticky;top:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .side-title{font-size:13px;font-weight:600;color:var(--muted);margin:2px 4px 8px}
+  #runList{list-style:none;margin:0;padding:0;max-height:calc(100vh - 160px);overflow:auto}
+  .run-item{display:block;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:9px;padding:8px 10px;cursor:pointer;font:inherit;color:inherit}
+  .run-item:hover{background:#f2f6fc}
+  .run-item.active{background:#eaf1ff;border-color:#c7dbff}
+  .run-title{display:block;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+  .run-meta{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+  .side-empty{font-size:13px;color:var(--muted);margin:6px 4px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#94a3b8;flex:none}
+  .dot.running{background:#0d9488}
+  .dot.completed{background:#15803d}
+  .dot.failed{background:#dc2626}
+  .dot.queued{background:#d97706}
+
+  main{flex:1 1 auto;min-width:0}
+  .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;font-size:13.5px;color:var(--muted)}
+  .toolbar label{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+  .toolbar button{font:inherit;font-size:13.5px;padding:4px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--text);cursor:pointer}
+  .toolbar button:hover{background:#f2f6fc}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 12px;overflow-wrap:anywhere}
+  .card.codex{border-left:4px solid var(--codex);background:#fbfdff}
+  .card.ds{border-left:4px solid var(--ds);background:#fbfefd}
+  .card.final{border-left:4px solid var(--ds);background:#fbfefd}
+  .card.tool,.card.diag,.card.other{border-left:4px solid var(--tool)}
+  .card.err{border-left:4px solid #dc2626;background:#fff8f8}
+  .head,summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .title{font-size:14.5px;font-weight:600}
+  .card.codex .title{color:var(--codex)}
+  .card.ds .title,.card.final .title{color:var(--ds)}
+  .time{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .arg-hint{font-size:12px;color:var(--muted);font-weight:400;overflow-wrap:anywhere}
+  .badge{font-size:11.5px;border-radius:999px;padding:1px 8px;border:1px solid}
+  .badge:empty{display:none}
+  .badge.ok{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+  .badge.err{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+  .badge.wait{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
+
+  .summary .sum-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .summary h2{font-size:17px;margin:0;overflow-wrap:anywhere}
+  .pill{font-size:12.5px;padding:2px 9px;border-radius:999px;border:1px solid;flex:none}
+  .pill.queued{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+  .pill.running{background:#ecfdf7;border-color:#a7f3d0;color:#0f766e;animation:pulse 1.6s ease-in-out infinite}
+  .pill.completed{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+  .pill.failed{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+  .pill.cancelled,.pill.timed_out,.pill.unknown{background:#f1f5f9;border-color:#e2e8f0;color:#475569}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.62}}
+  @media (prefers-reduced-motion:reduce){.pill.running{animation:none}}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 18px;margin-top:10px}
+  .f{min-width:0}
+  .f .k{font-size:12px;color:var(--muted)}
+  .f .v{font-size:14px;overflow-wrap:anywhere}
+  .note-err{color:#991b1b;font-size:13px;margin-top:8px;overflow-wrap:anywhere}
+
+  pre{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.55 ui-monospace,Consolas,"Courier New",monospace;background:#fbfcfe;border:1px solid #eef2f8;border-radius:8px;padding:9px 11px}
+  pre.result-pre{max-height:340px;overflow:auto}
+  pre.scroll{max-height:280px;overflow:auto}
+  .sec-title{font-size:12.5px;font-weight:600;color:var(--muted);margin-top:10px}
+  .pending{font-size:13px;color:var(--muted);padding:5px 0 0}
+  details.card>summary{cursor:pointer;list-style:none;padding:2px 0}
+  details.card>summary::-webkit-details-marker{display:none}
+  details.card>summary::before{content:"▸";font-size:11px;color:var(--muted)}
+  details.card[open]>summary::before{content:"▾"}
+
+  .step{font-size:12.5px;color:var(--muted);margin:0 0 6px;padding:3px 0 3px 10px;border-left:2px dotted #d3dce8;overflow-wrap:anywhere}
+  .step-time{font-variant-numeric:tabular-nums}
+  .step.turn-end,.step.bridge{color:#4b5c73}
+  .muted{color:#8a99ad}
+  .hint{color:var(--muted);font-size:14px;margin:0 0 12px}
+  .empty{color:var(--muted);font-size:14px;background:#fff;border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;margin:0 0 12px}
+
+  @media (max-width:820px){
+    .wrap{padding:16px 12px 60px}
+    .layout{flex-direction:column}
+    .sidebar{position:static;width:100%;flex:1 1 auto}
+    #runList{max-height:236px}
+    .grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Codex × DeepSeek 协作面板</h1>
+    <p>任务指令 · 实时执行 · 验收反馈　｜　时间为新加坡时间（UTC+8）　｜　工具与步骤详情可展开</p>
+  </header>
+
+  <div id="banner"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-title">历史任务<span id="runCount"></span></div>
+      <ul id="runList"></ul>
+      <p id="sideEmpty" class="side-empty" hidden>暂无任务记录</p>
+    </aside>
+
+    <main>
+      <div class="toolbar">
+        <label><input type="checkbox" id="follow"> 自动跟随最新事件</label>
+        <button type="button" id="jump">跳到最新</button>
+        <span id="pollInfo">正在连接本地服务…</span>
+      </div>
+      <div id="summary"></div>
+      <p id="evEmpty" class="empty" hidden></p>
+      <div id="events"></div>
+    </main>
+  </div>
+  <noscript><p class="empty">本页面需要启用 JavaScript 才能显示实时进度。</p></noscript>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var POLL_MS = 1500;
+  var MAX_TEXT = 20000;
+  var STATUS_LABEL = {queued:'排队中', running:'执行中', completed:'执行结束', failed:'失败', cancelled:'已取消', timed_out:'已超时', handed_off:'用户已接手'};
+  var REASON_LABEL = {completed:'正常完成', cancelled:'已取消', timed_out:'超时', max_tokens:'达到长度上限', error:'出错'};
+  var TYPE_LABEL = {session:'会话', status:'状态', text:'说明', tool_call:'工具调用', tool_result:'工具结果',
+    final:'最终报告', codex:'Codex 消息', bridge_status:'任务状态', diagnostic:'诊断信息', error:'错误'};
+
+  var el = {
+    banner: document.getElementById('banner'),
+    runList: document.getElementById('runList'),
+    runCount: document.getElementById('runCount'),
+    sideEmpty: document.getElementById('sideEmpty'),
+    summary: document.getElementById('summary'),
+    events: document.getElementById('events'),
+    evEmpty: document.getElementById('evEmpty'),
+    follow: document.getElementById('follow'),
+    jump: document.getElementById('jump'),
+    pollInfo: document.getElementById('pollInfo')
+  };
+
+  var st = {
+    chosen: '',
+    list: [],
+    listKey: '',
+    renderedRun: '',
+    order: [],
+    toolBlocks: {},
+    codexIndex: 0,
+    openState: {},
+    busy: false,
+    connected: null,
+    failures: 0,
+    offlineBanner: false,
+    bannerTimer: 0,
+    lastUpdate: '',
+    status: '',
+    summarySig: '',
+    durationEl: null
+  };
+
+  /* ---------- 基础工具 ---------- */
+  function h(tag, cls, text){
+    var node = document.createElement(tag);
+    if(cls) node.className = cls;
+    if(text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function statusLabel(s){ return STATUS_LABEL[s] || (s ? String(s) : '未知'); }
+  function statusClass(s){
+    return Object.prototype.hasOwnProperty.call(STATUS_LABEL, s) ? String(s) : 'unknown';
+  }
+  function fmtTime(v){
+    if(typeof v !== 'string' || !v) return '—';
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(v);
+    return m ? (m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] + ':' + m[6]) : v;
+  }
+  function clockOf(v){
+    if(typeof v !== 'string') return '';
+    var m = /T(\d{2}:\d{2}:\d{2})/.exec(v);
+    return m ? m[1] : '';
+  }
+  function toMs(v){
+    if(typeof v !== 'string' || !v) return null;
+    var t = Date.parse(v);
+    return isNaN(t) ? null : t;
+  }
+  function fmtDuration(sec){
+    if(sec === null || !isFinite(sec) || sec < 0) return '—';
+    var s = Math.floor(sec), hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    if(hh > 0) return hh + ' 小时 ' + mm + ' 分钟';
+    if(mm > 0) return mm + ' 分 ' + ss + ' 秒';
+    return ss + ' 秒';
+  }
+  function fmtNum(n){
+    var s = String(n);
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function elapsedSeconds(d){
+    var a = toMs(d.started);
+    if(a === null) return null;
+    var b = toMs(d.finished);
+    if(b === null) b = Date.now();
+    return (b - a) / 1000;
+  }
+  function cap(t){
+    var s = (t === null || t === undefined) ? '' : String(t);
+    if(s.length > MAX_TEXT) return s.slice(0, MAX_TEXT) + '\n…（内容较长，仅显示前 ' + MAX_TEXT + ' 个字符）';
+    return s;
+  }
+  function asText(v){
+    if(v === null || v === undefined) return '';
+    if(typeof v === 'string') return v;
+    try{ return JSON.stringify(v, null, 2); }catch(e){ return String(v); }
+  }
+  function bodyPre(text, cls){
+    var s = asText(text);
+    return h('pre', cls || null, s === '' ? '（无内容）' : cap(s));
+  }
+  function hint(text){ return h('p', 'hint', text); }
+  function sgClock(){
+    try{ return new Date().toLocaleTimeString('en-GB', {hour12:false}); }
+    catch(e){ return new Date().toLocaleTimeString('en-GB', {hour12:false}); }
+  }
+  function nearBottom(){
+    return (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 160);
+  }
+  function scrollLatest(){
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+
+  /* ---------- 顶部提示条 ---------- */
+  function hideBanner(){
+    if(st.bannerTimer){ clearTimeout(st.bannerTimer); st.bannerTimer = 0; }
+    el.banner.className = '';
+    el.banner.textContent = '';
+  }
+  function showBanner(kind, text, autoHideMs){
+    if(st.bannerTimer){ clearTimeout(st.bannerTimer); st.bannerTimer = 0; }
+    el.banner.className = 'show ' + kind;
+    el.banner.textContent = text;
+    if(autoHideMs) st.bannerTimer = setTimeout(function(){ st.bannerTimer = 0; hideBanner(); }, autoHideMs);
+  }
+  function updatePollInfo(){
+    if(st.connected === false){
+      el.pollInfo.textContent = '刷新暂停，正在等待服务恢复…';
+    }else if(st.lastUpdate){
+      el.pollInfo.textContent = '每 1.5 秒自动刷新 · 最后更新 ' + st.lastUpdate;
+    }else{
+      el.pollInfo.textContent = '正在连接本地服务…';
+    }
+  }
+
+  /* ---------- 任务列表 ---------- */
+  function applyRunList(list){
+    st.list = list;
+    var key = JSON.stringify(list.map(function(x){ return [x.id, x.title, x.status, x.created, x.stage_label, x.control_label]; }));
+    if(key === st.listKey) return;
+    st.listKey = key;
+    var frag = document.createDocumentFragment();
+    list.forEach(function(item){
+      var btn = h('button', 'run-item');
+      btn.type = 'button';
+      btn.setAttribute('data-id', String(item.id || ''));
+      if(String(item.id) === String(st.chosen)) btn.classList.add('active');
+      var meta = h('span', 'run-meta');
+      meta.append(h('span', 'dot ' + statusClass(item.status)),
+                 h('span', null, (item.stage_label || statusLabel(item.status)) + ' · ' + fmtTime(item.created)));
+      btn.append(h('span', 'run-title', item.title || item.id || '未命名任务'), meta);
+      var li = h('li');
+      li.append(btn);
+      frag.append(li);
+    });
+    el.runList.replaceChildren(frag);
+    el.runCount.textContent = list.length ? '（' + list.length + '）' : '';
+    el.sideEmpty.hidden = list.length > 0;
+  }
+  function markActive(){
+    var items = el.runList.querySelectorAll('.run-item');
+    for(var i = 0; i < items.length; i++){
+      items[i].classList.toggle('active', items[i].getAttribute('data-id') === String(st.chosen));
+    }
+  }
+  function selectRun(id, usePush){
+    id = String(id || '');
+    if(!id || id === String(st.chosen)){ markActive(); return; }
+    st.chosen = id;
+    try{
+      if(usePush) history.pushState(null, '', '?run=' + encodeURIComponent(id));
+      else history.replaceState(null, '', '?run=' + encodeURIComponent(id));
+    }catch(e){ /* file:// 等场景忽略地址栏同步失败 */ }
+    markActive();
+    resetRunView();
+  }
+
+  /* ---------- 任务详情 ---------- */
+  function resetRunView(){
+    st.renderedRun = '';
+    st.order = [];
+    st.toolBlocks = {};
+    st.codexIndex = 0;
+    st.openState = {};
+    st.status = '';
+    st.summarySig = '';
+    st.durationEl = null;
+    el.events.replaceChildren();
+    el.evEmpty.hidden = true;
+    el.summary.replaceChildren(hint('正在读取任务…'));
+  }
+  function addField(grid, k, v){
+    var f = h('div', 'f');
+    var val = h('div', 'v', v);
+    f.append(h('div', 'k', k), val);
+    grid.append(f);
+    return val;
+  }
+  function renderSummary(d){
+    // 除“已运行时长”外内容不变时，只就地更新时长，避免整块重建影响阅读。
+    var sig = JSON.stringify([d.id, d.title, d.status, d.model, d.provider, d.workspace,
+      d.started, d.finished, d.usage, d.metering, d.error, d.review, d.stage_label, d.control_label, d.next_action, d.assignment]);
+    if(el.summary.childElementCount && sig === st.summarySig && st.durationEl){
+      st.durationEl.textContent = fmtDuration(elapsedSeconds(d));
+      return;
+    }
+    st.summarySig = sig;
+    var card = h('section', 'card summary');
+    var head = h('div', 'sum-head');
+    head.append(h('span', 'pill ' + statusClass(d.status), d.stage_label || statusLabel(d.status)),
+                h('h2', null, d.title || '未命名任务'));
+    card.append(head);
+
+    var grid = h('div', 'grid');
+    addField(grid, '由谁负责', d.control_label || '—');
+    addField(grid, '下一步', d.next_action || '—');
+    addField(grid, '委派执行状态', statusLabel(d.status));
+    addField(grid, 'Codex 验收', d.review === 'accepted' ? '验收通过' : (d.review === 'changes-needed' ? '未达标' : (d.review === 'inconclusive' ? '尚无法确认' : '待验收')));
+    if(d.assignment && d.assignment.policy === 'bounded'){
+      addField(grid, '执行预算', '预留第 ' + d.assignment.attempt_number + '/' + d.assignment.attempt_limit + ' 轮，任务链剩余 ' + d.assignment.attempts_remaining + ' 轮');
+    }
+    addField(grid, '模型与提供方', (d.model || '—') + (d.provider ? ' · ' + d.provider : ''));
+    addField(grid, '工作目录', d.workspace || '—');
+    addField(grid, '开始时间（本地时间）', d.started ? fmtTime(d.started) : '—');
+    addField(grid, '结束时间（本地时间）',
+      d.finished ? fmtTime(d.finished) : (d.status === 'running' ? '进行中' : '—'));
+    st.durationEl = addField(grid, '已运行时长', fmtDuration(elapsedSeconds(d)));
+    var u = (d.usage && typeof d.usage === 'object') ? d.usage : {};
+    if(typeof u.inputTokens === 'number') addField(grid, '未缓存输入 token', fmtNum(u.inputTokens));
+    if(typeof u.outputTokens === 'number') addField(grid, '输出 token', fmtNum(u.outputTokens));
+    if(typeof u.cacheReadTokens === 'number') addField(grid, '缓存读取 token', fmtNum(u.cacheReadTokens) + (d.metering && d.metering.partial_fields.indexOf('cacheReadTokens') >= 0 ? '（部分）' : ''));
+    var meter = d.metering, cost = meter && meter.cost;
+    if(meter){
+      addField(grid, '用量统计范围', meter.coverage === 'unavailable' ? '未知：尚无提供方计数' : (meter.coverage === 'partial' ? '已报告部分主会话用量' : '已报告主会话用量'));
+      if(cost && typeof cost.usd_min === 'number'){
+        addField(grid, '等值用量估算（USD）', (cost.status === 'partial' ? '部分 ' : '') + '$' + cost.usd_min.toFixed(6) + (cost.usd_max !== cost.usd_min ? '–$' + cost.usd_max.toFixed(6) : '') + '（非额外扣款）');
+      }else addField(grid, '等值用量估算', '未知');
+      if(meter.quota_contribution){
+        var q = meter.quota_contribution.windows;
+        [['five_hour','五小时'],['weekly','每周'],['monthly','每月']].forEach(function(pair){
+          var v=q[pair[0]];
+          addField(grid, '本任务占' + pair[1] + '套餐额度（估算）', v.percent_min.toFixed(4) + '%–' + v.percent_max.toFixed(4) + '%（非账户剩余）');
+        });
+      }
+      addField(grid, '统计说明', meter.note);
+      if(cost) addField(grid, '费用说明', cost.note);
+      if(meter.assignment_total && meter.assignment_total.rounds > 1){
+        var total = meter.assignment_total, tc = total.cost;
+        addField(grid, '任务链合计 token（含返工）', total.coverage === 'unavailable' ? '未知' : (total.coverage === 'partial' ? '已报告部分：' : '已报告：') + '未缓存输入 ' + fmtNum(total.tokens.inputTokens) + '，输出 ' + fmtNum(total.tokens.outputTokens));
+        addField(grid, '任务链等值用量估算（USD）', tc.status === 'unavailable' ? '未知' : (tc.status === 'partial' ? '部分 ' : '') + '$' + tc.usd_min.toFixed(6) + '–$' + tc.usd_max.toFixed(6));
+      }
+    }
+    addField(grid, '任务编号', d.id || '—');
+    card.append(grid);
+
+    if(d.error) card.append(h('div', 'note-err', '执行错误：' + asText(d.error)));
+    el.summary.replaceChildren(card);
+  }
+
+  /* ---------- 事件渲染 ---------- */
+  function previewArgs(input){
+    if(input === null || input === undefined) return '';
+    if(typeof input !== 'object') return String(input).slice(0, 70);
+    var keys = Object.keys(input), parts = [];
+    for(var i = 0; i < keys.length && parts.length < 3; i++){
+      var v = input[keys[i]], s;
+      if(v === null || v === undefined || typeof v !== 'object') s = String(v);
+      else s = JSON.stringify(v);
+      if(s.length > 55) s = s.slice(0, 55) + '…';
+      parts.push(keys[i] + '=' + s);
+    }
+    if(keys.length > parts.length) parts.push('…');
+    return parts.join(' · ');
+  }
+  function detailsCard(kind, key, open){
+    var d = h('details', 'card ' + kind);
+    if(key){
+      d.setAttribute('data-key', key);
+      if(Object.prototype.hasOwnProperty.call(st.openState, key)) open = st.openState[key];
+      d.addEventListener('toggle', function(){ st.openState[key] = d.open; });
+    }
+    if(open) d.open = true;
+    var sum = h('summary');
+    var parts = {root:d, sum:sum, title:h('span', 'title'), badge:h('span', 'badge'), time:h('span', 'time')};
+    sum.append(parts.title, parts.badge, parts.time);
+    d.append(sum);
+    return parts;
+  }
+  function renderCodex(e, frag){
+    var isTask = st.codexIndex === 0;
+    st.codexIndex += 1;
+    var card = h('section', 'card codex');
+    var head = h('div', 'head');
+    head.append(h('span', 'title', isTask ? 'Codex 任务指令' : 'Codex 验收反馈'),
+                h('span', 'time', clockOf(e.time)));
+    card.append(head, bodyPre(e.text));
+    frag.append(card);
+    return true;
+  }
+  function renderText(e, frag){
+    var card = h('section', 'card ds');
+    var head = h('div', 'head');
+    head.append(h('span', 'title', 'DeepSeek 执行说明'), h('span', 'time', clockOf(e.time)));
+    card.append(head, bodyPre(e.text));
+    frag.append(card);
+    return true;
+  }
+  function renderToolCall(e, frag){
+    var id = e.callId ? String(e.callId) : ('anon-' + String(e.order));
+    var d = detailsCard('tool', 'tool:' + id, false);
+    d.title.textContent = '工具调用 · ' + (e.tool ? String(e.tool) : '未知工具');
+    d.badge.textContent = '执行中';
+    d.badge.className = 'badge wait';
+    d.time.textContent = clockOf(e.time);
+    var preview = previewArgs(e.input);
+    if(preview) d.sum.insertBefore(h('span', 'arg-hint', preview), d.time);
+    var slot = h('div', 'result');
+    slot.append(h('div', 'pending', '尚未收到结果…'));
+    var box = h('div', 'sec');
+    box.append(h('div', 'sec-title', '调用参数'), bodyPre(e.input, 'args'),
+               h('div', 'sec-title', '执行结果'), slot);
+    d.root.append(box);
+    st.toolBlocks[id] = {badge:d.badge, slot:slot};
+    frag.append(d.root);
+    return true;
+  }
+  function renderToolResult(e, frag){
+    var id = e.callId ? String(e.callId) : '';
+    var status = e.status ? String(e.status) : '';
+    var ok = (status === '' || status === 'completed' || status === 'success');
+    var label = ok ? '已完成' : (status === 'error' ? '失败' : status);
+    var text = (e.result !== undefined && e.result !== null) ? e.result : e.message;
+    if(id && Object.prototype.hasOwnProperty.call(st.toolBlocks, id)){
+      var block = st.toolBlocks[id];
+      block.slot.replaceChildren(bodyPre(text, 'result-pre'));
+      block.badge.textContent = label;
+      block.badge.className = 'badge ' + (ok ? 'ok' : 'err');
+      return false;
+    }
+    var d = detailsCard('tool', 'toolres:' + String(e.order), false);
+    d.title.textContent = '工具结果' + (id ? ' · ' + id : '');
+    d.badge.textContent = label;
+    d.badge.className = 'badge ' + (ok ? 'ok' : 'err');
+    d.time.textContent = clockOf(e.time);
+    d.root.append(bodyPre(text, 'result-pre'));
+    frag.append(d.root);
+    return true;
+  }
+  function renderFinal(e, frag){
+    var d = detailsCard('final', 'final:' + String(e.order), true);
+    d.title.textContent = 'DeepSeek 最终报告';
+    d.time.textContent = clockOf(e.time);
+    d.root.append(bodyPre(e.text));
+    frag.append(d.root);
+    return true;
+  }
+  function renderStatus(e, frag){
+    var phase = e.phase ? String(e.phase) : '';
+    if(phase === 'step_end'){
+      var row = h('div', 'step');
+      var label = '步骤';
+      if(e.turn !== undefined && e.turn !== null) label += ' ' + e.turn;
+      if(e.step !== undefined && e.step !== null) label += '.' + e.step;
+      row.append(h('span', 'step-time', clockOf(e.time)), h('span', null, ' · ' + label + ' 完成'));
+      var u = e.usage || {}, bits = [];
+      if(typeof u.inputTokens === 'number') bits.push('输入 ' + fmtNum(u.inputTokens));
+      if(typeof u.outputTokens === 'number') bits.push('输出 ' + fmtNum(u.outputTokens));
+      if(typeof u.cacheReadTokens === 'number') bits.push('缓存读取 ' + fmtNum(u.cacheReadTokens));
+      if(bits.length) row.append(h('span', 'muted', '（' + bits.join(' · ') + '）'));
+      frag.append(row);
+      return true;
+    }
+    if(phase === 'turn_end'){
+      var row2 = h('div', 'step turn-end');
+      var reasonKind = e.reason && typeof e.reason === 'object' ? e.reason.kind : e.reason;
+      var reason = reasonKind ? (REASON_LABEL[String(reasonKind)] || String(reasonKind)) : '结束';
+      row2.append(h('span', 'step-time', clockOf(e.time)), h('span', null, ' · 本轮执行结束：' + reason));
+      frag.append(row2);
+      return true;
+    }
+    return false;
+  }
+  function renderBridgeStatus(e, frag){
+    var row = h('div', 'step bridge');
+    row.append(h('span', 'step-time', clockOf(e.time)),
+               h('span', null, ' · 任务状态更新：' + statusLabel(e.status)));
+    frag.append(row);
+    return true;
+  }
+  function renderError(e, frag){
+    var card = h('section', 'card err');
+    var head = h('div', 'head');
+    head.append(h('span', 'title', '执行出错'), h('span', 'time', clockOf(e.time)));
+    card.append(head, bodyPre((e.message !== undefined && e.message !== null) ? e.message : e.text));
+    frag.append(card);
+    return true;
+  }
+  function renderDiagnostic(e, frag){
+    var d = detailsCard('diag', 'diag:' + String(e.order), false);
+    d.title.textContent = '诊断信息';
+    d.time.textContent = clockOf(e.time);
+    d.root.append(bodyPre(e.text, 'scroll'));
+    frag.append(d.root);
+    return true;
+  }
+  function renderSession(e, frag){
+    var row = h('div', 'step session');
+    row.append(h('span', 'step-time', clockOf(e.time)),
+               h('span', null, ' · 已建立执行会话' + (e.cwd ? '（' + e.cwd + '）' : '')));
+    frag.append(row);
+    return true;
+  }
+  function renderUnknown(e, frag, type){
+    var d = detailsCard('other', 'other:' + String(e.order), false);
+    d.title.textContent = '其他事件 · ' + (TYPE_LABEL[type] || type);
+    d.time.textContent = clockOf(e.time);
+    d.root.append(bodyPre(e, 'scroll'));
+    frag.append(d.root);
+    return true;
+  }
+  function renderEvent(e, frag){
+    var type = (e && e.type) ? String(e.type) : 'unknown';
+    if(type === 'codex') return renderCodex(e, frag);
+    if(type === 'text') return renderText(e, frag);
+    if(type === 'tool_call') return renderToolCall(e, frag);
+    if(type === 'tool_result') return renderToolResult(e, frag);
+    if(type === 'final') return renderFinal(e, frag);
+    if(type === 'status') return renderStatus(e, frag);
+    if(type === 'bridge_status') return renderBridgeStatus(e, frag);
+    if(type === 'error') return renderError(e, frag);
+    if(type === 'diagnostic') return renderDiagnostic(e, frag);
+    if(type === 'session') return renderSession(e, frag);
+    return renderUnknown(e, frag, type);
+  }
+
+  /* ---------- 增量追加（不重建已读内容） ---------- */
+  function ordersOf(events){
+    return events.map(function(e, i){
+      return (e && e.order !== undefined && e.order !== null) ? ('o' + String(e.order)) : ('i' + i);
+    });
+  }
+  function samePrefix(a, b){
+    if(a.length > b.length) return false;
+    for(var i = 0; i < a.length; i++){ if(a[i] !== b[i]) return false; }
+    return true;
+  }
+  function updateEmptyNote(){
+    var has = el.events.childElementCount > 0;
+    el.evEmpty.hidden = has;
+    if(has) return;
+    if(st.status === 'queued') el.evEmpty.textContent = '任务已排队，等待开始执行…';
+    else if(st.status === 'running') el.evEmpty.textContent = '任务正在执行，事件即将出现…';
+    else el.evEmpty.textContent = '暂时没有事件记录。';
+  }
+  function rebuild(runId, events, orders){
+    st.renderedRun = runId;
+    st.order = orders.slice();
+    st.toolBlocks = {};
+    st.codexIndex = 0;
+    var frag = document.createDocumentFragment();
+    for(var i = 0; i < events.length; i++) renderEvent(events[i], frag);
+    el.events.replaceChildren(frag);
+  }
+  function appendEvents(runId, data){
+    var events = Array.isArray(data.events) ? data.events : [];
+    var orders = ordersOf(events);
+    if(st.renderedRun !== runId || !samePrefix(st.order, orders)){
+      rebuild(runId, events, orders);
+      updateEmptyNote();
+      return;
+    }
+    if(orders.length === st.order.length){ updateEmptyNote(); return; }
+    var follow = el.follow.checked && nearBottom();
+    var frag = document.createDocumentFragment();
+    var added = false;
+    for(var i = st.order.length; i < events.length; i++){
+      if(renderEvent(events[i], frag)) added = true;
+    }
+    if(added) el.events.append(frag);
+    st.order = orders;
+    updateEmptyNote();
+    if(added && follow) scrollLatest();
+  }
+
+  /* ---------- 轮询 ---------- */
+  async function getJSON(url){
+    var res = await fetch(url, {cache:'no-store'});
+    if(!res.ok){
+      var err = new Error('HTTP ' + res.status);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+  async function handleMissingRun(id){
+    var fallback = (st.list.length && String(st.list[0].id) !== String(id)) ? String(st.list[0].id) : '';
+    if(fallback){
+      showBanner('warn', '原链接中的任务不存在，已切换到最新任务。', 6000);
+      selectRun(fallback, false);
+      return;
+    }
+    st.renderedRun = '';
+    st.order = [];
+    st.summarySig = '';
+    st.durationEl = null;
+    el.events.replaceChildren();
+    el.summary.replaceChildren(hint('未找到该任务，可能记录已被移除。'));
+    el.evEmpty.hidden = false;
+    el.evEmpty.textContent = '未找到该任务对应的记录。';
+  }
+  async function loadRun(){
+    var id = st.chosen;
+    if(!id){
+      el.summary.replaceChildren();
+      st.summarySig = '';
+      st.durationEl = null;
+      el.evEmpty.hidden = false;
+      el.evEmpty.textContent = '还没有任务记录。Codex 提交任务后会显示在这里。';
+      return;
+    }
+    var data;
+    try{
+      data = await getJSON('/api/run?id=' + encodeURIComponent(id));
+    }catch(err){
+      if(err && err.status === 404){ await handleMissingRun(id); return; }
+      throw err;
+    }
+    if(String(st.chosen) !== String(id)) return;
+    if(!data || typeof data !== 'object') throw new Error('返回数据格式异常');
+    st.status = String(data.status || '');
+    renderSummary(data);
+    appendEvents(String(id), data);
+  }
+  async function tick(){
+    if(st.busy) return;
+    st.busy = true;
+    try{
+      var list = await getJSON('/api/runs');
+      if(!Array.isArray(list)) throw new Error('任务列表格式异常');
+      applyRunList(list);
+      if(!st.chosen && list.length) selectRun(list[0].id, false);
+      await loadRun();
+      st.connected = true;
+      st.failures = 0;
+      st.lastUpdate = sgClock();
+      if(st.offlineBanner){ st.offlineBanner = false; showBanner('ok', '连接已恢复，数据继续刷新。', 4000); }
+      updatePollInfo();
+    }catch(err){
+      st.connected = false;
+      st.failures += 1;
+      st.offlineBanner = true;
+      showBanner('err', '无法连接本地协作服务，正在自动重试…（第 ' + st.failures + ' 次失败'
+        + (err && err.message ? '：' + err.message : '') + '）');
+      updatePollInfo();
+    }finally{
+      st.busy = false;
+    }
+  }
+
+  /* ---------- 启动 ---------- */
+  var initial = new URLSearchParams(location.search).get('run');
+  if(initial) st.chosen = String(initial);
+
+  el.follow.addEventListener('change', function(){ if(el.follow.checked) scrollLatest(); });
+  el.jump.addEventListener('click', scrollLatest);
+  el.runList.addEventListener('click', function(ev){
+    var btn = (ev.target && ev.target.closest) ? ev.target.closest('.run-item') : null;
+    if(btn) selectRun(btn.getAttribute('data-id'), true);
+  });
+  window.addEventListener('popstate', function(){
+    var id = new URLSearchParams(location.search).get('run') || '';
+    if(id && id !== st.chosen) selectRun(id, false);
+  });
+
+  updatePollInfo();
+  el.summary.replaceChildren(hint('正在读取任务…'));
+  if(location.protocol === 'file:'){
+    showBanner('warn', '当前是直接打开本地文件，无法读取任务数据。请改用服务地址打开，例如 http://127.0.0.1:47831/ 。');
+  }
+  tick();
+  setInterval(tick, POLL_MS);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+name: Windows tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python checks (no model calls)
+        run: python -X utf8 -m unittest test_bridge test_mcp test_desktop test_policy test_usage test_usage_mcp test_install
+      - name: Connector and dashboard checks
+        run: node --test test_native.mjs test-dashboard.cjs
