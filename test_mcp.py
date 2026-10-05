@@ -227,6 +227,16 @@ class ProtocolTests(McpTestBase):
 
 
 class SubmitTests(McpTestBase):
+    def test_official_computer_use_is_available_without_an_extra_submit_flag(self):
+        with patch('desktop_client.check_connection', return_value={'ready': True, 'computer_use': True}):
+            text, data, error, _, _ = self.submit_with_mocks({'workspace': str(self.workspace), 'task': 'GUI demo'})
+        self.assertFalse(error, text); self.assertTrue(data['computer_use'])
+        self.assertTrue(bridge.read_json(self.runs/data['task_id']/'state.json')['computer_use'])
+
+    def test_absent_official_plugin_is_reported_honestly_without_blocking_other_delegated_work(self):
+        text, data, error, _, _ = self.submit_with_mocks({'workspace': str(self.workspace), 'task': 'Read a file'})
+        self.assertFalse(error, text); self.assertFalse(data['computer_use'])
+
     def test_unavailable_desktop_is_refused_before_allocating_task_or_worker(self):
         with patch('desktop_client.call',side_effect=RuntimeError('Harness 未连接')),patch.object(bridge.subprocess,'Popen') as spawn:
             text,data,error=self.tool('deepseek_submit',{'workspace':str(self.workspace),'task':'不应执行'})

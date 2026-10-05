@@ -58,6 +58,7 @@ export class Connector {
     const latest = this.tasks.get(this.bySession.get(t.session_id));
     const owner = latest?.owner === 'human' ? 'human' : t.owner;
     return { ...t, owner, backend: 'desktop', desktop_visible: true, control: owner,
+      computer_use_available: this.computerUseState().tools_ready === true,
       permission_settings: { sandbox: t.permission, approval: 'never' } };
   }
   log(t, value) {
@@ -67,8 +68,13 @@ export class Connector {
   serial(fn) {
     const pending = this.gate.then(fn); this.gate = pending.catch(() => {}); return pending;
   }
+  computerUseState() {
+    return this.policy.computerUseStatus?.() ?? { provider: null, catalog_size: 0, tools_ready: false,
+      desktop_actions: 0, model_requests: 0 };
+  }
   async submit(req) {
     return this.serial(async () => {
+      const computerUse = this.computerUseState().tools_ready === true;
       if (!ID.test(req.task_id ?? '') || !['read-only', 'workspace-write'].includes(req.permission) ||
           typeof req.task !== 'string' || !req.task.trim() || req.task.length > 160000 ||
           typeof req.title !== 'string' || req.title.length > 200 ||
@@ -115,13 +121,15 @@ export class Connector {
       await this.ctx.sessionController.rename({ sessionId: agent.id, title });
       const t = { id: req.task_id, session_id: agent.id, workspace_id: workspace.id, workspace: cwd,
         provider: model.provider, model: model.model, usage_capture: 1,
-        desktop_title: title, title: req.title, permission: req.permission, owner: 'codex', status: 'queued',
+        desktop_title: title, title: req.title, permission: req.permission, computer_use: computerUse, owner: 'codex', status: 'queued',
         created: stamp(), request_id: 'codex-' + req.task_id,
         ...(parent ? { parent_task_id: parent.id } : {}) };
       this.tasks.set(t.id, t); this.bySession.set(t.session_id, t.id); this.save();
       this.log(t, { type: 'native_session', session_id: t.session_id, workspace_id: t.workspace_id, title, control: t.owner });
       this.log(t, { type: 'usage_capture', version: 1 });
       try {
+        if (computerUse) this.log(t, { type: 'computer_use', phase: 'available',
+          text: 'Harness 官方电脑操作可用；DeepSeek 按任务需要选择工具，无桥接 GUI 次数或前后台限制。' });
         await this.ctx.sessionController.prompt({ sessionId: t.session_id, requestId: t.request_id,
           content: [{ type: 'text', text: req.task }], clientTimeZone: this.config.clientTimeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone }, new AbortController().signal);
         if (ACTIVE.has(t.status)) {
@@ -136,7 +144,9 @@ export class Connector {
     t.status = 'failed'; t.error = redact(String(error?.message ?? error)); t.finished = stamp();
     this.clear(t); this.save(); this.log(t, { type: 'error', message: t.error, trace: redact(error?.stack ?? '') });
   }
-  clear(t) { clearTimeout(this.timers.get(t.id)); this.timers.delete(t.id); }
+  clear(t) {
+    clearTimeout(this.timers.get(t.id)); this.timers.delete(t.id);
+  }
   takeover(sessionId, reason = 'client_input') {
     const t = this.tasks.get(this.bySession.get(sessionId));
     if (!t || t.owner === 'human') return t;
@@ -225,6 +235,16 @@ export class Connector {
     }
   }
   wire() {
+    // Passive progress only: the official provider owns tools, policy, and lifetime.
+    this.ctx.on('tools/execute', async (exec, next) => {
+      const t = this.tasks.get(this.bySession.get(exec.agent?.id));
+      if (t?.owner === 'codex' && ACTIVE.has(t.status) && exec.name.startsWith('cua_driver_native__')) {
+        t.computer_calls = (t.computer_calls ?? 0) + 1;
+        this.save(); this.log(t, { type: 'computer_use', phase: 'call', name: exec.name,
+          calls: t.computer_calls });
+      }
+      return next();
+    }, { global: true });
     this.ctx.on('session/event', (session, event) => this.observe(session, event), { global: true });
     this.ctx.on('agent/inbox/inserted', ({ agent, message }) => {
       const t = this.tasks.get(this.bySession.get(agent.id));
@@ -262,7 +282,11 @@ export class Connector {
   async dispatch(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid request');
     switch (input.operation) {
-      case 'health': return { protocol: PROTOCOL, version: 1, revision: 6, usage_tracking: true, prompt_signal: true, pid: process.pid, native_session: true, return_control: true };
+      case 'health': { const cua = this.computerUseState(); return { protocol: PROTOCOL, version: 1, revision: 8,
+        computer_use: cua.tools_ready === true, computer_use_provider: cua.provider,
+        computer_use_tools: cua.catalog_size, usage_tracking: true, prompt_signal: true, pid: process.pid,
+        native_session: true, return_control: true }; }
+      case 'computer_use_check': return this.computerUseState();
       case 'submit': return this.submit(input);
       case 'status': return this.publicTask(this.get(input.task_id));
       case 'cancel': return this.stop(input.task_id);

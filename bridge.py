@@ -340,11 +340,13 @@ def submit(args):
         raise ValueError("Invalid execution backend")
     if backend == 'headless' and not DSH.is_file():
         raise RuntimeError('Set CODEX_DEEPSEEK_DSH to the Harness CLI executable for headless mode')
+    computer_use = False
     if backend == "desktop":
         import desktop_client
         connection = desktop_client.check_connection()
         if not connection["ready"]:
             raise RuntimeError(scrub(connection["message"]) + " " + connection["next_action"])
+        computer_use = connection.get('computer_use') is True
     # One writer at a time per workspace. Stale workers are handled separately.
     for old in RUNS.glob("*/state.json"):
         state = current_state(old.parent)
@@ -380,6 +382,7 @@ def submit(args):
         "resume_session": session_id, "profile": PROFILE,
         "provider": "opencode-go", "model": "deepseek-v4.1-flash", "dashboard": url + "/?run=" + run_id}
     state["backend"] = backend
+    state['computer_use'] = computer_use
     if parent_id:
         state["parent_task_id"] = parent_id
     policy.reserve(plan, path, state, write_json)

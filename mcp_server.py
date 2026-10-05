@@ -24,7 +24,7 @@ from types import SimpleNamespace
 import bridge
 
 SERVER_NAME = "codex-deepseek-mcp"
-SERVER_VERSION = "1.6.1"
+SERVER_VERSION = "1.8.0"
 SUPPORTED_PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[-1]
 
@@ -358,6 +358,12 @@ def _compact(record, source, calls):
         return _event("handoff", "用户已在 Harness 接手；Codex 停止向此会话调度", time_text, source)
     if kind == "control_return":
         return _event("control_return", "用户已交回 Codex；尚未发送新的模型任务", time_text, source)
+    if kind == 'computer_use':
+        if record.get('phase') == 'call':
+            body = f"电脑操作：{record.get('name')}（累计 {record.get('calls')} 次调用）"
+        else:
+            body = record.get('text') or f"电脑操作：{record.get('phase')} {record.get('message', '')}"
+        return _event('computer_use', _clean(body), time_text, source)
     label = _short(kind, 60)
     body = record.get("text")
     if isinstance(body, str) and body.strip():
@@ -628,6 +634,8 @@ def tool_submit(args):
     lines.append(f"仪表盘（本次未自动启动，需要时调用 deepseek_details）：{state.get('dashboard') or _dashboard_url(task_id)}")
     if state.get("backend") == "desktop":
         lines.append("执行方式：Harness 原生桌面会话；自动关联工作区，可在客户端查看或接手。")
+    if state.get('computer_use'):
+        lines.append('电脑操作：Harness 官方插件已加载，DeepSeek 可自行按需使用；文件沙箱不限制 GUI。')
     text = "\n".join(lines)
     structured = {"task_id": task_id, "title": title, "status": status, "permission": permission,
         "workspace": str(workspace), "timeout_seconds": timeout_seconds,
@@ -635,7 +643,7 @@ def tool_submit(args):
         "worker_pid": info.get("worker_pid"), "dashboard_started": False,
         "backend": state.get("backend", "headless"),
         "dashboard": state.get("dashboard") or _dashboard_url(task_id), "waited_for_model": False,
-        'assignment': assignment, 'acceptance_criteria': contract['acceptance_criteria'],
+        'computer_use': state.get('computer_use', False), 'assignment': assignment, 'acceptance_criteria': contract['acceptance_criteria'],
         'change_scope': contract['change_scope'], 'optional_improvements': contract['optional_improvements']}
     return text, structured, False
 
@@ -722,6 +730,8 @@ def tool_status(args):
         **bridge.task_view(state),
         "desktop_connection": state.get("desktop_connection"), "prompt_mode": state.get("prompt_mode"),
         "permission": state.get("permission"), "workspace": state.get("workspace"),
+        'computer_use': state.get('computer_use', False), 'computer_use_available': state.get('computer_use_available', False),
+        'computer_calls': state.get('computer_calls', 0),
         "backend": state.get("backend", "headless"), "control": state.get("control"),
         "session_id": state.get("session_id"), "workspace_id": state.get("workspace_id"),
         "desktop_title": state.get("desktop_title"),
@@ -1011,6 +1021,7 @@ def tool_connection(args):
     if info.get('connector_revision') is not None:
         text += f"\n连接器版本：{info['connector_revision']}"
     text += '\nToken 记录：' + ('已加载' if info.get('usage_tracking') else '尚未加载；彻底退出并重开 Harness 后生效。')
+    text += '\n官方电脑操作：' + (f"已加载（{info.get('computer_use_tools')} 个工具）；委派后可按需使用，无额外 GUI 开关。" if info.get('computer_use') else '未检测到可用官方插件；普通任务仍可使用。GUI 任务需先安装、启用插件并重开 Harness。')
     return text, info, False
 
 
@@ -1122,6 +1133,7 @@ TOOL_SPECS = [
     {
         "name": "deepseek_submit",
         "description": "向本地 Codex→DeepSeek 桥接提交一个执行任务，立即返回（不等待模型）。"
+            "只在用户明确委派 DeepSeek 时调用；委派后可自行按需使用 Harness 官方电脑操作工具，或由 Codex 在 task 中要求使用，无额外 GUI 开关。"
             "首次必须提供验收条件和范围；同一任务最多两轮，返工/故障重试共用。续接传 parent_task_id、repair_reason，必须已有逐条验收证据，沿用原条件。不得另建任务绕过上限；新目标需用户明确授权。",
         "inputSchema": {
             "type": "object",

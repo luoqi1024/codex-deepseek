@@ -54,12 +54,48 @@ function fixture(t) {
     const id = '20261005-120000-' + n.toString(16).padStart(8, '0');
     const req = { task_id: id, workspace, title: '中文演示', task: 'Read only. $(literal)', permission: 'read-only', timeout_seconds: 60, ...extra };
     const run = path.join(runs, id); fs.mkdirSync(run, { recursive: true });
-    fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify({ id, workspace, permission: req.permission }));
+    fs.writeFileSync(path.join(run, 'state.json'), JSON.stringify({ id, workspace, permission: req.permission, computer_use: req.computer_use === true }));
     return req;
   }
   return { connector, ctx, agents, workspaces, emit, emitted, request, runs, workspace,
+    middleware(name, data, next) { return listeners.get(name)[0](data, next); },
     get prompts() { return prompts; }, get cancellations() { return cancellations; } };
 }
+
+test('official GUI is available without a task flag and remains available at human takeover', async t => {
+  const f = fixture(t);
+  f.connector.policy.computerUseStatus = () => ({ provider: 'cua-driver-native', catalog_size: 56, tools_ready: true });
+  const req = f.request(), result = await f.connector.submit(req);
+  assert.equal(result.computer_use, true); assert.equal(result.computer_use_available, true);
+  await f.connector.submit(req); assert.equal(f.prompts, 1);
+  f.connector.takeover(result.session_id);
+  assert.equal(f.connector.publicTask(f.connector.get(req.task_id)).computer_use_available, true);
+  assert.equal(f.cancellations, 0);
+});
+
+test('official GUI progress is passive, forwards foreground/browser tools and has no forty-call cap', async t => {
+  const f = fixture(t);
+  const req = f.request(), result = await f.connector.submit(req);
+  const agent = f.agents.get(result.session_id);
+  for (let i = 0; i < 45; i++) {
+    const exec = { agent, name: 'cua_driver_native__browser_click', arguments: { delivery_mode: 'foreground' } };
+    const value = await f.middleware('tools/execute', exec, async () => exec.arguments);
+    assert.deepEqual(value, { delivery_mode: 'foreground' });
+  }
+  assert.equal(f.connector.get(req.task_id).computer_calls, 45);
+  assert.equal(f.cancellations, 0);
+  f.connector.takeover(agent.id);
+  await f.middleware('tools/execute', { agent, name: 'cua_driver_native__launch_app' }, async () => 'human');
+  assert.equal(f.connector.get(req.task_id).computer_calls, 45);
+});
+
+test('GUI readiness reflects actual registered tools; checking readiness performs no desktop or model call', async t => {
+  const f = fixture(t);
+  f.connector.policy.computerUseStatus = () => ({ provider: 'cua-driver-native', catalog_size: 0, tools_ready: false, desktop_actions: 0, model_requests: 0 });
+  assert.equal((await f.connector.dispatch({operation: 'health'})).computer_use, false);
+  const result = await f.connector.dispatch({operation: 'computer_use_check'});
+  assert.equal(result.tools_ready, false); assert.equal(result.desktop_actions, 0); assert.equal(f.prompts, 0);
+});
 
 test('public usage counters include retries and compaction, redact to numeric fields, stop at human takeover', async t => {
   const f=fixture(t), req=f.request(), result=await f.connector.submit(req);

@@ -31,6 +31,9 @@ def check_connection():
             'native_sessions':health.get('native_session') is True,
             'return_control':health.get('return_control') is True,
             'usage_tracking':health.get('usage_tracking') is True,
+            'computer_use':health.get('computer_use') is True,
+            'computer_use_provider':health.get('computer_use_provider'),
+            'computer_use_tools':health.get('computer_use_tools'),
             'message':'本机连接正常，原生会话及双向交接接口可用。' if ready else '本机连接正常，连接器尚未加载当前所需功能。',
             'next_action':'明确要求使用 DeepSeek 后才会执行任务。' if ready else '彻底退出并重开 Harness，加载已安装的新版连接器。'}
 
